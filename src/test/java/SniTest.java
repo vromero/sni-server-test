@@ -2,17 +2,16 @@ import org.apache.commons.lang3.StringUtils;
 import org.glassfish.grizzly.Connection;
 import org.glassfish.grizzly.Grizzly;
 import org.glassfish.grizzly.attributes.Attribute;
-import org.glassfish.grizzly.filterchain.*;
+import org.glassfish.grizzly.filterchain.FilterChainBuilder;
+import org.glassfish.grizzly.ssl.SSLBaseFilter;
 import org.glassfish.grizzly.http.server.HttpServer;
 import org.glassfish.grizzly.http.server.NetworkListener;
-import org.glassfish.grizzly.nio.transport.TCPNIOTransport;
-import org.glassfish.grizzly.nio.transport.TCPNIOTransportBuilder;
 import org.glassfish.grizzly.sni.SNIConfig;
 import org.glassfish.grizzly.sni.SNIFilter;
 import org.glassfish.grizzly.sni.SNIServerConfigResolver;
 import org.glassfish.grizzly.ssl.SSLContextConfigurator;
 import org.glassfish.grizzly.ssl.SSLEngineConfigurator;
-import org.glassfish.grizzly.utils.StringFilter;
+import org.glassfish.grizzly.http.server.AddOn;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -49,9 +48,6 @@ public class SniTest  {
 
         protected void startServer() throws IOException {
             NetworkListener networkListener = new NetworkListener("sample-listener", "localhost", 8081);
-            TCPNIOTransport transport = createTransport();
-            transport.setProcessor(getFilters());
-            networkListener.setTransport(transport);
 
             sslServerEngineConfig = new SSLEngineConfigurator(createSSLContextConfigurator().createSSLContext(), false, false, false);
             networkListener.setSSLEngineConfig(sslServerEngineConfig);
@@ -59,34 +55,12 @@ public class SniTest  {
             webServer = HttpServer.createSimpleServer();
             webServer.addListener(networkListener);
             networkListener.setSecure(true);
+            networkListener.registerAddOn(new SniAddOn());
             webServer.start();
         }
 
         protected void stopServer() {
             webServer.shutdownNow();
-        }
-
-        private TCPNIOTransport createTransport() {
-            return TCPNIOTransportBuilder.newInstance().build();
-        }
-
-        private FilterChain getFilters() {
-            SNIFilter sniFilter = getSniFilter();
-
-            final FilterChain chain = FilterChainBuilder.stateless()
-                    .add(new TransportFilter())
-                    .add(sniFilter)
-                    .add(new StringFilter())
-                    .add(new BaseFilter() {
-                        @Override
-                        public NextAction handleRead(final FilterChainContext ctx)
-                                throws IOException {
-                            return ctx.getInvokeAction();
-                        }
-                    })
-                    .build();
-
-            return chain;
         }
 
         private SNIFilter getSniFilter() {
@@ -110,21 +84,43 @@ public class SniTest  {
             SSLContextConfigurator sslContextConfigurator = new SSLContextConfigurator();
             ClassLoader cl = SniTest.class.getClassLoader();
 
-            URL cacertsUrl = cl.getResource("sni_truststore_client");
+//            URL cacertsUrl = cl.getResource("sni_truststore_client");
+//            if (cacertsUrl != null) {
+//                sslContextConfigurator.setTrustStoreFile(cacertsUrl.getFile());
+//                sslContextConfigurator.setTrustStorePass("mulepassword");
+//            }
+//
+//            URL keystoreUrl = cl.getResource("sni_keystore_server");
+//            if (keystoreUrl != null) {
+//                sslContextConfigurator.setKeyStoreFile(keystoreUrl.getFile());
+//                sslContextConfigurator.setKeyStorePass("mulepassword");
+//                sslContextConfigurator.setKeyPass("mulepassword");
+//            }
+
+            URL cacertsUrl = cl.getResource("ssltest-cacerts.jks");
             if (cacertsUrl != null) {
                 sslContextConfigurator.setTrustStoreFile(cacertsUrl.getFile());
-                sslContextConfigurator.setTrustStorePass("mulepassword");
+                sslContextConfigurator.setTrustStorePass("changeit");
             }
 
-            URL keystoreUrl = cl.getResource("sni_keystore_server");
+            URL keystoreUrl = cl.getResource("ssltest-keystore.jks");
             if (keystoreUrl != null) {
                 sslContextConfigurator.setKeyStoreFile(keystoreUrl.getFile());
-                sslContextConfigurator.setKeyStorePass("mulepassword");
-                sslContextConfigurator.setKeyPass("mulepassword");
+                sslContextConfigurator.setKeyStorePass("changeit");
             }
-
             return sslContextConfigurator;
         }
-    }
+        
+        private class SniAddOn implements AddOn {
 
+            public void setup(NetworkListener networkListener,
+                    FilterChainBuilder builder) {
+                // replace SSLFilter (if any) with SNIFilter
+                final int idx = builder.indexOfType(SSLBaseFilter.class);
+                if (idx != -1) {
+                    builder.set(idx, getSniFilter());
+                }
+            }
+        }        
+    }
 }
